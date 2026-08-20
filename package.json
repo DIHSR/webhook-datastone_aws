@@ -1,0 +1,20 @@
+{
+  "name": "datastone-mcp-aws",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Servidor MCP Data Stone em AWS Lambda, API Gateway e DynamoDB.",
+  "scripts": {
+    "check": "node --check src/index.js && node --check src/storage.js && node --check src/handler.js && node --check src/cleanup.js",
+    "test": "node --test test.mjs",
+    "sam:validate": "sam validate --lint",
+    "sam:build": "sam build",
+    "sam:deploy": "sam deploy --guided"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.963.0",
+    "@aws-sdk/client-secrets-manager": "^3.963.0",
+    "@aws-sdk/lib-dynamodb": "^3.963.0"
+  },
+  "devDependencies": {}
+}

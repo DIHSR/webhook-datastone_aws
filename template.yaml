@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: MCP Data Stone com receptor de webhook em Lambda, API Gateway e DynamoDB.
+
+Parameters:
+  DataStoneSecretArn:
+    Type: String
+    Description: ARN de um segredo JSON com DATASTONE_TOKEN e, opcionalmente, MCP_API_TOKEN.
+  PublicBaseUrl:
+    Type: String
+    Default: ""
+    Description: URL publica sem barra final. Deixe vazia para usar a URL recebida pelo API Gateway.
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    MemorySize: 256
+    # A HTTP API tem timeout maximo de 30 s; a Lambda encerra um pouco antes.
+    Timeout: 28
+    Tracing: Active
+
+Resources:
+  DataStoneApi:
+    Type: AWS::Serverless::HttpApi
+
+  DataStoneFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/handler.handler
+      Description: Servidor MCP Data Stone e receptor de webhooks.
+      Environment:
+        Variables:
+          PAYLOADS_TABLE_NAME: !Ref PayloadsTable
+          DATASTONE_SECRET_ARN: !Ref DataStoneSecretArn
+          PUBLIC_BASE_URL: !Ref PublicBaseUrl
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PayloadsTable
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DataStoneSecretArn
+      Events:
+        AllHttp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DataStoneApi
+            Path: /{proxy+}
+            Method: ANY
+        RootHttp:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DataStoneApi
+            Path: /
+            Method: ANY
+
+  PayloadsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  PayloadCleanupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/cleanup.handler
+      Description: Remove fisicamente payloads de webhook ja vencidos.
+      Environment:
+        Variables:
+          PAYLOADS_TABLE_NAME: !Ref PayloadsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PayloadsTable
+      Events:
+        EveryFifteenMinutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Enabled: true
+
+Outputs:
+  McpEndpoint:
+    Description: URL publica do MCP. Configure-a no cliente com Authorization Bearer se MCP_API_TOKEN existir no segredo.
+    Value: !Sub "https://${DataStoneApi}.execute-api.${AWS::Region}.amazonaws.com"
+  WebhookBaseUrl:
+    Description: Base da URL de callback gerada para a Data Stone.
+    Value: !Sub "https://${DataStoneApi}.execute-api.${AWS::Region}.amazonaws.com/webhooks/datastone/"
+  PayloadsTableName:
+    Value: !Ref PayloadsTable
